@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Structured (ECS-style JSON) logging for the Udapay Ledger Service.
+
+  Every log line is a single JSON object. The W3C trace context captured by
+  CorrelationIdFilter is stored in SLF4J's MDC under `traceId` and `spanId`;
+  LogstashEncoder is configured with includeMdc=true and
+  includedMdcKeyNames=traceId,spanId so those two keys (and only those two)
+  are copied into every JSON log event. That lets one request be followed
+  across services with:   docker compose logs ledger-api | grep <traceId>
+-->
+<configuration>
+
+    <!-- ======================= JSON (ECS) appender ======================= -->
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <!-- MDC propagation: includeMdc=true, includedMdcKeyNames=traceId,spanId -->
+            <includeMdc>true</includeMdc>
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>spanId</includeMdcKeyName>
+
+            <!-- Rename default fields to Elastic Common Schema names -->
+            <fieldNames>
+                <timestamp>@timestamp</timestamp>
+                <message>message</message>
+                <logger>log.logger</logger>
+                <level>log.level</level>
+                <thread>process.thread.name</thread>
+                <stackTrace>error.stack_trace</stackTrace>
+                <version>[ignore]</version>
+                <levelValue>[ignore]</levelValue>
+            </fieldNames>
+            <timeZone>UTC</timeZone>
+
+            <customFields>{"ecs.version":"8.11","service.name":"udapay-ledger","event.dataset":"udapay-ledger.log"}</customFields>
+
+            <!-- Keep stack traces compact and readable in JSON -->
+            <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                <maxLength>4096</maxLength>
+                <rootCauseFirst>true</rootCauseFirst>
+            </throwableConverter>
+        </encoder>
+    </appender>
+
+    <!-- Quieten noisy frameworks -->
+    <logger name="org.apache.catalina" level="WARN"/>
+    <logger name="org.hibernate.SQL" level="WARN"/>
+
+    <root level="INFO">
+        <appender-ref ref="JSON"/>
+    </root>
+</configuration>

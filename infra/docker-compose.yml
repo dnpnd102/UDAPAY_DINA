@@ -1,0 +1,176 @@
+# =============================================================================
+# Udapay dev stack
+#
+#   docker compose up -d           # start everything
+#   docker compose ps              # udapay_postgres, udapay_vault, udapay_keycloak,
+#                                  # udapay_ledger_api, udapay_nginx
+#   docker compose up -d --build ledger-api   # rebuild after Java/resource changes
+#
+# Secrets: NO database password is written in this file or anywhere else in
+# the repository. `secrets-init` generates one at first start into a private
+# volume; Postgres reads it via POSTGRES_PASSWORD_FILE and `vault-init` seeds
+# the same value into Vault at kv/udapay-ledger/dev. The API only ever learns
+# it from Vault (Spring Cloud Vault, bootstrap.yml).
+# =============================================================================
+name: udapay
+
+services:
+
+  # ---- one-shot: generate the DB password once, keep it in a private volume ----
+  secrets-init:
+    image: alpine:3.20
+    container_name: udapay_secrets_init
+    volumes:
+      - udapay_secrets:/run/udapay-secrets
+    command: >
+      sh -c '
+        set -e;
+        f=/run/udapay-secrets/db_password;
+        if [ ! -s "$$f" ]; then
+          umask 077;
+          head -c 32 /dev/urandom | base64 | tr -dc "A-Za-z0-9" | head -c 32 > "$$f";
+          echo "[secrets-init] generated new database password";
+        else
+          echo "[secrets-init] reusing existing database password";
+        fi;
+        chmod 644 "$$f"'
+
+  # ---- PostgreSQL ---------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: udapay_postgres
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-udapay}
+      POSTGRES_USER: ${POSTGRES_USER:-udapay}
+      POSTGRES_PASSWORD_FILE: /run/udapay-secrets/db_password
+    volumes:
+      - udapay_secrets:/run/udapay-secrets:ro
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-udapay} -d ${POSTGRES_DB:-udapay}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # ---- HashiCorp Vault (dev mode) ----------------------------------------------
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: udapay_vault
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID:-root-token-dev}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://127.0.0.1:8200
+    ports:
+      - "8200:8200"
+    command: server -dev
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  # ---- one-shot: seed application secrets into Vault ---------------------------
+  vault-init:
+    image: hashicorp/vault:1.15
+    container_name: udapay_vault_init
+    depends_on:
+      vault:
+        condition: service_healthy
+      secrets-init:
+        condition: service_completed_successfully
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN_ID:-root-token-dev}
+      POSTGRES_USER: ${POSTGRES_USER:-udapay}
+      DB_PASSWORD_FILE: /run/udapay-secrets/db_password
+    volumes:
+      - udapay_secrets:/run/udapay-secrets:ro
+      - ./vault/init.sh:/vault/init.sh:ro
+    entrypoint: ["sh", "/vault/init.sh"]
+
+  # ---- Keycloak (OAuth2 authorization server) ---------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: udapay_keycloak
+    command: ["start-dev", "--import-realm", "--http-port=9000"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_PORT: "9000"
+      # Keycloak's management interface also defaults to 9000 — move it out of the way
+      KC_HTTP_MANAGEMENT_PORT: "9900"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ../keycloak-init:/opt/keycloak/data/import:ro
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+
+  # ---- Ledger API (Spring Boot 4) ---------------------------------------------
+  ledger-api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: udapay/ledger-service:local
+    container_name: udapay_ledger_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-udapay}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-udapay}
+      # Vault connection — the DB password is fetched from kv/udapay-ledger/dev
+      VAULT_HOST: vault
+      VAULT_PORT: "8200"
+      VAULT_SCHEME: http
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN_ID:-root-token-dev}
+      # Keycloak: iss claim seen by clients vs. in-network URL used to fetch JWKs
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI:-http://localhost:9000/realms/udapay}
+      KEYCLOAK_JWK_SET_URI: http://keycloak:9000/realms/udapay/protocol/openid-connect/certs
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 5
+    restart: unless-stopped
+
+  # ---- Nginx reverse proxy ----------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: udapay_nginx
+    depends_on:
+      ledger-api:
+        condition: service_started
+      keycloak:
+        condition: service_started
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  udapay_secrets:

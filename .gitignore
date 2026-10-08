@@ -1,0 +1,35 @@
+# Build output
+backend/target/
+**/target/
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# Local environment / secrets — never commit
+infra/.env
+*.env
+!infra/.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# Dependency-check data cache & reports
+backend/dependency-check-data/
+backend/target/dependency-check-report.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

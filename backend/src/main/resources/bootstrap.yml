@@ -1,0 +1,49 @@
+# =============================================================================
+# bootstrap.yml — loaded BEFORE application.yml by the Spring Cloud bootstrap
+# context (spring-cloud-starter-bootstrap). Its only job is to tell Spring
+# Cloud Vault where Vault is and which KV paths to read.
+#
+# Secrets are pulled from:
+#   kv/udapay-ledger            (shared across profiles)
+#   kv/udapay-ledger/<profile>  e.g. kv/udapay-ledger/dev
+#
+# Every key stored there becomes an ordinary Spring property with HIGHER
+# precedence than application.yml. We store `spring.datasource.password`
+# in Vault, so no database password ever lives in this repository.
+# See infra/vault/init.sh for how the dev stack seeds those secrets.
+# =============================================================================
+spring:
+  application:
+    name: udapay-ledger
+
+  cloud:
+    vault:
+      # Set VAULT_ENABLED=false only for throw-away local experiments.
+      enabled: ${VAULT_ENABLED:true}
+
+      # --- connection -------------------------------------------------------
+      host: ${VAULT_HOST:localhost}
+      port: ${VAULT_PORT:8200}
+      scheme: ${VAULT_SCHEME:http}
+      connection-timeout: 5000
+      read-timeout: 15000
+
+      # --- authentication ---------------------------------------------------
+      # Token auth is fine for the dev stack (Vault runs in -dev mode).
+      # In production swap this for AppRole / Kubernetes auth. The token is
+      # injected through the environment, never committed.
+      authentication: TOKEN
+      token: ${VAULT_TOKEN}
+
+      # Refuse to start if Vault is unreachable: we would rather fail loudly
+      # than silently run without the secrets we depend on.
+      fail-fast: true
+
+      # --- KV secrets engine ------------------------------------------------
+      kv:
+        enabled: true
+        backend: kv                 # secrets engine mount path  -> kv/
+        default-context: udapay-ledger
+        application-name: udapay-ledger
+        profile-separator: '/'      # kv/udapay-ledger/dev (not udapay-ledger-dev)
+        profiles: ${SPRING_PROFILES_ACTIVE:dev}

@@ -1,0 +1,126 @@
+{
+  "realm": "udapay",
+  "displayName": "Udapay",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 10,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "reader",
+        "description": "May list and search ledger transfers"
+      },
+      {
+        "name": "writer",
+        "description": "May create ledger transfers"
+      },
+      {
+        "name": "auditor",
+        "description": "Read-only access to aggregate ledger reports"
+      }
+    ]
+  },
+  "defaultRoles": ["offline_access", "uma_authorization"],
+  "clients": [
+    {
+      "clientId": "udapay-client",
+      "name": "Udapay API client",
+      "description": "Public client used by the Udapay front-end and for password-grant testing",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "rootUrl": "http://localhost:5500",
+      "baseUrl": "http://localhost:5500",
+      "redirectUris": [
+        "http://localhost:5500/*",
+        "http://127.0.0.1:5500/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5500",
+        "http://127.0.0.1:5500"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5500/*"
+      },
+      "defaultClientScopes": ["web-origins", "roles", "profile", "email"],
+      "optionalClientScopes": ["address", "phone", "offline_access"],
+      "protocolMappers": [
+        {
+          "name": "udapay-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "udapay-client",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "firstName": "Alice",
+      "lastName": "Writer",
+      "email": "alice@udapay.example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice-dev-password",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["reader", "writer"]
+    },
+    {
+      "username": "bob",
+      "firstName": "Bob",
+      "lastName": "Reader",
+      "email": "bob@udapay.example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob-dev-password",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["reader"]
+    },
+    {
+      "username": "carol",
+      "firstName": "Carol",
+      "lastName": "Auditor",
+      "email": "carol@udapay.example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "carol-dev-password",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["auditor"]
+    }
+  ]
+}

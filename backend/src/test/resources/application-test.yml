@@ -1,0 +1,23 @@
+# Test profile: in-memory H2 in PostgreSQL compatibility mode so the real
+# Flyway migration runs; JWTs are signed by a throw-away RSA key (TestJwtSupport).
+spring:
+  datasource:
+    url: jdbc:h2:mem:udapay;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:9000/realms/udapay
+          jwk-set-uri: http://localhost:9000/realms/udapay/protocol/openid-connect/certs
+
+logging:
+  level:
+    com.udapay.ledger: INFO

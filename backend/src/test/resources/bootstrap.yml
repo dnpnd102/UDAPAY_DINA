@@ -1,0 +1,8 @@
+# Test-only bootstrap: shadows src/main/resources/bootstrap.yml on the test
+# classpath so the unit/integration tests never try to reach a Vault server.
+spring:
+  application:
+    name: udapay-ledger
+  cloud:
+    vault:
+      enabled: false
